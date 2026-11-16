@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Watercolor Drops - a tweakable WebGL hero</title>
+<meta name="description" content="Tweak a WebGL watercolor hero in real time: colors, drop size, spread, granulation, paper. Export it as a single HTML file.">
+<!-- MIT License - Copyright (c) 2026 Fabrice David (Brisco Webdesign). See LICENSE. -->
+<style>
+  :root { --ink: #1d1a17; --paper: #f6f3ee; --line: rgba(29,26,23,.16); --accent: #e0143d; }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; background: var(--paper); color: var(--ink); font: 400 14px/1.4 system-ui, sans-serif; }
+  .hero { position: fixed; inset: 0; overflow: hidden; display: grid; place-items: center; isolation: isolate; }
+  .hero canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; z-index: -1; touch-action: manipulation; mix-blend-mode: multiply; }
+  .hero-content { position: relative; text-align: center; padding: 0 16px; max-width: 900px; pointer-events: none; }
+  .hero-content::before { content: ""; position: absolute; inset: -12% -8%; z-index: -1; border-radius: 50%;
+    background: radial-gradient(closest-side, rgba(255,255,255,.55), rgba(255,255,255,0)); }
+  .hero h1 { font: 600 clamp(2.4rem, 7vw, 5.5rem)/1.02 Georgia, "Times New Roman", serif; letter-spacing: -.02em; text-shadow: 0 0 8px rgba(255,255,255,.6), 0 0 28px rgba(255,255,255,.5); }
+  .hero p { margin-top: 1.2rem; font: 400 clamp(1rem, 2vw, 1.25rem)/1.5 system-ui, sans-serif; opacity: .85; text-shadow: 0 0 8px rgba(255,255,255,.6), 0 0 28px rgba(255,255,255,.5); }
+
+  /* ---- Panneau de réglages ---- */
+  .panel { position: fixed; top: 12px; right: 12px; bottom: 12px; width: 320px; display: flex; flex-direction: column; background: rgba(255,255,255,.88);
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); border: 1.5px solid var(--ink); border-radius: 18px; box-shadow: 0 14px 40px rgba(29,26,23,.16); z-index: 5; }
+  .panel[hidden] { display: none; }
+  .panel header { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px 10px; }
+  .panel h2 { font: 600 1.15rem/1 Georgia, serif; }
+  .panel .scroll { overflow-y: auto; padding: 0 16px 14px; flex: 1; }
+  .panel section { padding: 12px 0; border-top: 1px solid var(--line); }
+  .panel h3 { font: 700 .68rem/1 system-ui, sans-serif; letter-spacing: .14em; text-transform: uppercase; opacity: .6; margin-bottom: 10px; }
+  .row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 4px 10px; margin-bottom: 8px; }
+  .row label { font-size: .84rem; }
+  .row output { font-size: .78rem; opacity: .6; font-variant-numeric: tabular-nums; }
+  .row input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--ink); }
+  .swatches { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+  .swatches input { width: 100%; height: 34px; padding: 0; border: 1.5px solid var(--ink); border-radius: 8px; background: none; cursor: pointer; }
+  .hint { font-size: .74rem; opacity: .6; margin-top: 6px; }
+  select, input[type=text] { width: 100%; padding: .5em .6em; border: 1.5px solid var(--ink); border-radius: 8px; background: #fff; font: inherit; color: inherit; }
+  input[type=text] + input[type=text] { margin-top: 6px; }
+  .check { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: .84rem; }
+  .btns { display: flex; flex-wrap: wrap; gap: 6px; }
+  button { padding: .55em .9em; border: 1.5px solid var(--ink); border-radius: 99px; background: transparent; color: var(--ink); font: 600 .8rem/1 system-ui, sans-serif; cursor: pointer; }
+  button:hover { background: var(--ink); color: var(--paper); }
+  button.primary { background: var(--ink); color: var(--paper); }
+  button.primary:hover { background: var(--accent); border-color: var(--accent); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .toast { position: fixed; left: 50%; bottom: 20px; transform: translate(-50%, 20px); padding: .6em 1.1em; border-radius: 99px; background: var(--ink); color: var(--paper); font-size: .85rem; opacity: 0; pointer-events: none; transition: opacity .25s, transform .25s; z-index: 9; }
+  .toast.on { opacity: 1; transform: translate(-50%, 0); }
+  .reopen { position: fixed; top: 12px; right: 12px; z-index: 5; background: rgba(255,255,255,.88); }
+  .reopen[hidden] { display: none; }
+  @media (max-width: 760px) {
+    .panel { top: auto; left: 8px; right: 8px; bottom: 8px; width: auto; max-height: 52vh; }
+  }
+  @media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+</style>
+</head>
+<body>
+<section class="hero" id="hero">
+  <canvas id="c" aria-hidden="true"></canvas>
+  <div class="hero-content" id="heroText">
+    <h1 id="tHead">Watercolor drops</h1>
+    <p id="tSub">Click anywhere to add a drop.</p>
+  </div>
+</section>
+
+<aside class="panel" id="panel" aria-label="Watercolor settings">
+  <header>
+    <h2>Watercolor Drops</h2>
+    <button type="button" id="hide" aria-label="Hide the settings panel">Hide</button>
+  </header>
+  <div class="scroll">
+    <section>
+      <h3>Palette</h3>
+      <div class="row" style="grid-template-columns:1fr"><select id="preset" aria-label="Palette preset"></select></div>
+      <div class="swatches" id="swatches"></div>
+      <p class="hint">Colors 1-4 lead the brush strokes, 5-6 are accents.</p>
+      <div class="row" style="margin-top:10px"><label for="paper">Paper color</label><input type="color" id="paper" style="width:44px;height:28px;padding:0;border:1.5px solid var(--ink);border-radius:8px;background:none"></div>
+    </section>
+    <section><h3>Drops</h3><div id="sliders1"></div></section>
+    <section><h3>Placement</h3><div id="sliders3"></div></section>
+    <section><h3>Look</h3><div id="sliders2"></div></section>
+    <section>
+      <h3>Text</h3>
+      <input type="text" id="head" aria-label="Headline" maxlength="60">
+      <input type="text" id="sub" aria-label="Subline" maxlength="120">
+      <label class="check"><input type="checkbox" id="showText"> Show text</label>
+      <label class="check"><input type="checkbox" id="clicks"> Click adds a drop</label>
+    </section>
+    <section>
+      <h3>Actions</h3>
+      <div class="btns">
+        <button type="button" id="pause">Pause</button>
+        <button type="button" id="restart">Restart</button>
+        <button type="button" id="rand">Randomize</button>
+      </div>
+    </section>
+    <section>
+      <h3>Export</h3>
+      <div class="btns">
+        <button type="button" class="primary" id="copyHtml">Copy HTML</button>
+        <button type="button" id="dlHtml">Download .html</button>
+        <button type="button" id="dlPng">Save PNG</button>
+        <button type="button" id="copyJson">Copy settings</button>
+        <button type="button" id="share">Copy link</button>
+      </div>
+      <p class="hint">The exported page is one self-contained file: no library, no image. MIT licensed.</p>
+    </section>
+  </div>
+</aside>
+<button type="button" class="reopen" id="reopen" hidden>Settings</button>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+/* ======================================================================
+   Moteur : une fonction autonome (sans dépendance externe). L'export
+   reprend son code source tel quel via createWatercolor.toString().
+   ====================================================================== */
+function createWatercolor(canvas, hero, opts) {
+  const N = 20;
+  const cfg = Object.assign({
+    colors: ['#8c0a1a', '#eb4d08', '#fab80d', '#d93366', '#40801f', '#1a738c'],
+    paper: '#f6f3ee', size: 1, spread: 1, fall: 0.45, rate: 1, life: 4,
+    edge: 1, gran: 1, strength: 1, grain: 1, softness: 0.10, accent: 0.25, clicks: true,
+    count: 20, stroke: 4.5, spacing: 1.1, wander: 1.2, vary: 1
+  }, opts);
+
+  const VS = 'attribute vec2 aPos;\nvoid main(){ gl_Position = vec4(aPos, 0.0, 1.0); }';
+  const FS = `precision highp float;
+#define N 20
+uniform vec2 uRes;
+uniform vec4 uA[N];   // x, y, age (s, <0 = falling), seed
+uniform vec4 uB[N];   // r, g, b (pigment transmittance), max radius
+uniform float uF[N];  // global opacity (end-of-life fade)
+uniform float uFall, uSpeed, uEdge, uGran, uStr, uGrain, uSoft;
+
+float hash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+float noise(vec2 p){
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1,0)), f.x),
+             mix(hash(i + vec2(0,1)), hash(i + vec2(1,1)), f.x), f.y);
+}
+float fbm(vec2 p){
+  float v = 0.0, a = 0.5;
+  mat2 m = mat2(1.6, 1.2, -1.2, 1.6);
+  for (int i = 0; i < 4; i++){ v += a * noise(p); p = m * p; a *= 0.5; }
+  return v;
+}
+
+void main(){
+  vec2 p = gl_FragCoord.xy / uRes.y;
+
+  // Paper: grain + fibres. The canvas is multiplied over the page background.
+  float grain = noise(p * 520.0);
+  vec3 col = vec3(1.0);
+  float paperTex = 1.0 + uGrain * (0.5 * (0.6 * grain + 0.4 * fbm(p * 60.0)) - 0.25);
+
+  for (int i = 0; i < N; i++){
+    vec4 a = uA[i];
+    float age = a.z;
+    if (age < -2.0) continue;
+    vec4 b = uB[i];
+    float fade = uF[i];
+    float seed = a.w;
+
+    // Falling drop
+    if (age < 0.0){
+      float s = 1.0 + age / uFall;
+      vec2 pos = a.xy + vec2(0.0, (1.0 - s * s) * 0.55);
+      vec2 dd = p - pos; dd.y *= 0.65;
+      float m = 1.0 - smoothstep(0.007, 0.011, length(dd));
+      col *= pow(b.rgb, vec3(1.4 * m * smoothstep(0.0, 0.15, s)));
+      continue;
+    }
+
+    // Spreading drop
+    vec2 d = p - a.xy;
+    float rmax = b.w;
+    float R = rmax * (1.0 - exp(-age * 2.6 * uSpeed)) + rmax * 0.10 * (1.0 - exp(-age * 0.3 * uSpeed));
+    float rr = length(d);
+    if (rr > R * (1.0 + 0.7 * uEdge) + 0.02) continue;
+
+    vec2 q = d / rmax;
+    vec2 sp = vec2(seed * 37.1, seed * 19.7);
+    float ang = atan(d.y, d.x);
+
+    float n1 = fbm(q * 2.6 + sp);
+    float n2 = fbm(q * 8.0 + sp * 1.7);
+    float lobes = sin(ang * floor(3.0 + seed * 4.0) + seed * 20.0) * noise(vec2(ang * 1.5, seed * 9.0));
+    float dist = (rr + ((n1 - 0.5) * 0.55 * R + (n2 - 0.5) * 0.16 * R + lobes * 0.14 * R) * uEdge) / max(R, 1e-4);
+
+    float shape = 1.0 - smoothstep(1.0 - uSoft, 1.0, dist);
+    float body = 0.50 + 0.50 * smoothstep(0.25, 0.97, dist);        // pigment migrates to the edge
+    float gran = (1.0 - 0.28 * uGran) + 0.55 * uGran * fbm(q * 14.0 + sp);   // granulation
+    float thin = mix(1.0, 0.55, age / (age + 3.0));                 // the drop fades as it spreads
+    float core = exp(-pow(rr / (0.16 * R + 0.004), 2.0)) * exp(-age * 1.1) * 0.55;
+
+    float alpha = (shape * body * gran * 0.85 * thin + core * shape) * paperTex * fade;
+    alpha = clamp(alpha, 0.0, 0.95);
+    col *= pow(b.rgb, vec3(alpha * 1.25 * uStr));                   // subtractive mix
+  }
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+  let reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const gl = canvas.getContext('webgl', { antialias: false, alpha: false, powerPreference: 'low-power' });
+  const none = { update() {}, restart() {}, setPaused() {}, draw() {}, config: () => cfg };
+  // Software rendering (no GPU): the shader is too heavy, show a fixed composition instead
+  const dbg = gl && gl.getExtension('WEBGL_debug_renderer_info');
+  const soft = !!dbg && /swiftshader|llvmpipe|software/i.test(String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)));
+  if (soft) reduce = true;
+  if (!gl) { hero.style.background = 'radial-gradient(circle at 30% 40%, #f3a46b, ' + cfg.paper + ' 60%)'; return none; }
+
+  const compile = (type, src) => {
+    const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    return s;
+  };
+  const prog = gl.createProgram();
+  gl.attachShader(prog, compile(gl.VERTEX_SHADER, VS));
+  gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FS));
+  gl.linkProgram(prog);
+  gl.useProgram(prog);
+
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(prog, 'aPos');
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+
+  const U = name => gl.getUniformLocation(prog, name);
+  const uRes = U('uRes'), uA = U('uA'), uB = U('uB'), uF = U('uF');
+  const uFall = U('uFall'), uSpeed = U('uSpeed'), uEdge = U('uEdge'), uGran = U('uGran'), uStr = U('uStr'), uGrain = U('uGrain'), uSoft = U('uSoft');
+
+  // Pigments = transmittance (the darker a channel, the more it is absorbed). The hex colors are used as-is.
+  let palette = [];
+  const WARM = [0, 1, 2, 3];
+  const readPalette = () => { palette = cfg.colors.map(h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255)); };
+
+  let W = 1, H = 1, aspect = 1;
+  const resize = () => {
+    // Reduced render resolution: watercolor is soft anyway and the shader is the heaviest part of the page
+    const dpr = soft ? 0.35 : innerWidth < 900 ? 0.5 : Math.min(window.devicePixelRatio || 1, 1);
+    const r = hero.getBoundingClientRect();
+    W = Math.max(1, Math.round(r.width * dpr)); H = Math.max(1, Math.round(r.height * dpr));
+    canvas.width = W; canvas.height = H;
+    aspect = W / H;
+    gl.viewport(0, 0, W, H);
+    gl.uniform2f(uRes, W, H);
+    if (reduce || paused) draw();
+  };
+
+  const drops = [];
+  const A = new Float32Array(N * 4), B = new Float32Array(N * 4), F = new Float32Array(N);
+
+  const spawn = (x, y, size, color, age = -cfg.fall) => {
+    if (drops.length >= Math.min(N, cfg.count)) return;
+    drops.push({ x, y, age, seed: Math.random(), color, size, fade: 1, fading: false });
+  };
+
+  const upload = () => {
+    for (let i = 0; i < N; i++) {
+      const d = drops[i];
+      if (d) {
+        A.set([d.x, d.y, d.age, d.seed], i * 4);
+        B.set([...palette[d.color], d.size], i * 4);
+        F[i] = d.fade;
+      } else { A.set([0, 0, -99, 0], i * 4); B.set([1, 1, 1, 0.1], i * 4); F[i] = 0; }
+    }
+    gl.uniform4fv(uA, A); gl.uniform4fv(uB, B); gl.uniform1fv(uF, F);
+    gl.uniform1f(uFall, cfg.fall); gl.uniform1f(uSpeed, cfg.spread); gl.uniform1f(uEdge, cfg.edge);
+    gl.uniform1f(uGran, cfg.gran); gl.uniform1f(uStr, cfg.strength); gl.uniform1f(uGrain, cfg.grain); gl.uniform1f(uSoft, cfg.softness);
+  };
+  const draw = () => { upload(); gl.drawArrays(gl.TRIANGLES, 0, 3); };
+
+  // Brush stroke: a chain of drops that draws a branch or a petal
+  const stroke = { left: 0, x: 0, y: 0, ang: 0, size: 0, color: 0 };
+  const nextDrop = () => {
+    if (stroke.left <= 0) {
+      stroke.left = Math.max(1, Math.round(cfg.stroke * (0.65 + 0.7 * Math.random())));
+      stroke.x = aspect * (0.1 + Math.random() * 0.8);
+      stroke.y = 0.15 + Math.random() * 0.7;
+      stroke.ang = Math.random() * Math.PI * 2;
+      stroke.size = (0.13 + Math.random() * 0.10 * cfg.vary) * cfg.size;
+      stroke.color = WARM[Math.floor(Math.random() * WARM.length)];
+    }
+    const c = Math.random() < cfg.accent ? Math.floor(Math.random() * palette.length) : stroke.color;
+    spawn(stroke.x, stroke.y, stroke.size, c);
+    stroke.x += Math.cos(stroke.ang) * stroke.size * cfg.spacing;
+    stroke.y += Math.sin(stroke.ang) * stroke.size * cfg.spacing;
+    stroke.ang += (Math.random() - 0.5) * cfg.wander;
+    stroke.size = Math.max(0.05, stroke.size * 0.88);
+    stroke.left--;
+    return (stroke.left === 0 ? 1.6 + Math.random() * 1.2 : 0.28 + Math.random() * 0.25) / cfg.rate;
+  };
+
+  const step = dt => {
+    for (const d of drops) {
+      d.age += dt;
+      if (d.fading) d.fade = Math.max(0, d.fade - dt / 3);
+    }
+    for (let i = drops.length - 1; i >= 0; i--) if (drops[i].fade <= 0) drops.splice(i, 1);
+    if (drops.length >= Math.max(1, Math.min(N, cfg.count) - 3)) {
+      const old = drops.find(d => !d.fading && d.age > cfg.life);
+      if (old) old.fading = true;
+    }
+  };
+
+  // Fixed composition (no animation): reduced motion, no GPU, or a restart while paused
+  const compose = () => {
+    drops.length = 0; stroke.left = 0;
+    for (let i = 0; i < 4; i++) nextDrop();
+    stroke.left = 0;
+    for (let i = 0; i < 4; i++) nextDrop();
+    drops.forEach(d => { d.age = 30; });
+    draw();
+  };
+
+  hero.addEventListener('pointerdown', e => {
+    if (!cfg.clicks) return;
+    const r = hero.getBoundingClientRect();
+    spawn((e.clientX - r.left) / r.height, 1 - (e.clientY - r.top) / r.height,
+          (0.12 + Math.random() * 0.1 * cfg.vary) * cfg.size, Math.floor(Math.random() * palette.length));
+    if (paused) draw();
+  });
+
+  let paused = false, visible = true, clock = 0, nextAt = 0.3, last = performance.now();
+  const applyPaper = () => { hero.style.background = cfg.paper; };
+
+  const api = {
+    config: () => cfg,
+    update(patch) {
+      Object.assign(cfg, patch);
+      if (patch.colors) readPalette();
+      applyPaper();
+      if (reduce || paused) draw();
+    },
+    restart() {
+      drops.length = 0; stroke.left = 0; clock = 0; nextAt = 0.3;
+      if (reduce) compose(); else draw();
+    },
+    setPaused(p) { paused = p; if (!p) last = performance.now(); },
+    draw
+  };
+
+  readPalette();
+  applyPaper();
+  new ResizeObserver(resize).observe(hero);
+  resize();
+
+  if (reduce) { compose(); return api; }
+
+  new IntersectionObserver(([e]) => { visible = e.isIntersecting; }).observe(hero);
+
+  const frame = now => {
+    requestAnimationFrame(frame);
+    if (now - last < 30) return;                 // ~30 fps: plenty for a spreading drop
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    if (visible && !document.hidden && !paused) {
+      clock += dt;
+      if (clock >= nextAt) nextAt = clock + nextDrop();
+      step(dt);
+      draw();
+    }
+  };
+  // Start once the page is loaded so the text is not delayed
+  const start = () => { last = performance.now(); requestAnimationFrame(frame); };
+  if (document.readyState === 'complete') start(); else addEventListener('load', () => setTimeout(start, 400));
+  return api;
+}
+
+/* ======================================================================
+   Interface de l'outil
+   ====================================================================== */
+(() => {
+  const $ = id => document.getElementById(id);
+  const PRESETS = {
+    'Original':  { colors: ['#8c0a1a', '#eb4d08', '#fab80d', '#d93366', '#40801f', '#1a738c'], paper: '#f6f3ee' },
+    'Ocean':     { colors: ['#0b3c5d', '#1d7ea8', '#2fb5c8', '#6fd1c9', '#3a5a9b', '#e8c15a'], paper: '#f3f6f6' },
+    'Forest':    { colors: ['#2d5a27', '#6b9a2e', '#c9b03a', '#8a4b2a', '#1f6f64', '#b5473a'], paper: '#f4f2e9' },
+    'Sunset':    { colors: ['#b3123e', '#f0541e', '#ffb21a', '#e0559c', '#6a2c91', '#ff7f50'], paper: '#f8f1ea' },
+    'Ink':       { colors: ['#1c1c24', '#3a3a4a', '#5b4636', '#7a6a58', '#8c1c1c', '#2a4a6a'], paper: '#efe9dc' }
+  };
+  const SLIDERS = [
+    ['sliders1', 'size',     'Drop size',          0.4, 2.2, 0.01],
+    ['sliders1', 'rate',     'Drops per second',   0.3, 3,   0.01],
+    ['sliders1', 'spread',   'Spread speed',       0.3, 2.5, 0.01],
+    ['sliders1', 'fall',     'Fall time (s)',      0.1, 1.2, 0.01],
+    ['sliders1', 'life',     'Persistence (s)',    1,   12,  0.1],
+    ['sliders1', 'accent',   'Accent colors',      0,   1,   0.01],
+    ['sliders3', 'count',    'Max drops on screen', 1,  20,  1],
+    ['sliders3', 'stroke',   'Drops per stroke',   1,   10,  0.5],
+    ['sliders3', 'spacing',  'Spacing in a stroke', 0.4, 3,  0.01],
+    ['sliders3', 'wander',   'Stroke randomness',  0,   4,   0.01],
+    ['sliders3', 'vary',     'Size randomness',    0,   3,   0.01],
+    ['sliders2', 'edge',     'Edge roughness',     0,   2,   0.01],
+    ['sliders2', 'softness', 'Edge softness',      0.02, 0.4, 0.01],
+    ['sliders2', 'gran',     'Granulation',        0,   2,   0.01],
+    ['sliders2', 'strength', 'Pigment strength',   0.4, 1.6, 0.01],
+    ['sliders2', 'grain',    'Paper grain',        0,   2,   0.01]
+  ];
+
+  const DEFAULTS = Object.assign({
+    size: 1, rate: 1, spread: 1, fall: 0.45, life: 4, accent: 0.25, edge: 1, softness: 0.10, gran: 1, strength: 1, grain: 1,
+    clicks: true, count: 20, stroke: 4.5, spacing: 1.1, wander: 1.2, vary: 1, headline: 'Watercolor drops', subline: 'Click anywhere to add a drop.', showText: true
+  }, PRESETS.Original);
+  const state = Object.assign({}, DEFAULTS, { colors: DEFAULTS.colors.slice() });
+
+  // Réglages partagés via l'adresse (#...)
+  try { Object.assign(state, JSON.parse(decodeURIComponent(location.hash.slice(1)))); } catch (e) { /* adresse sans réglages */ }
+
+  const hero = $('hero'), canvas = $('c');
+  const ENGINE_KEYS = ['colors', 'paper', 'size', 'spread', 'fall', 'rate', 'life', 'edge', 'gran', 'strength', 'grain', 'softness', 'accent', 'clicks', 'count', 'stroke', 'spacing', 'wander', 'vary'];
+  const pick = keys => Object.fromEntries(keys.map(k => [k, state[k]]));
+  const wc = createWatercolor(canvas, hero, pick(ENGINE_KEYS));
+
+  const toast = msg => {
+    const t = $('toast'); t.textContent = msg; t.classList.add('on');
+    clearTimeout(toast.id); toast.id = setTimeout(() => t.classList.remove('on'), 1800);
+  };
+  let saveId;
+  const persist = () => {
+    clearTimeout(saveId);
+    saveId = setTimeout(() => { try { history.replaceState(null, '', '#' + encodeURIComponent(JSON.stringify(state))); } catch (e) { /* hors navigateur */ } }, 250);
+  };
+  const apply = patch => { Object.assign(state, patch); wc.update(pick(ENGINE_KEYS)); persist(); };
+
+  // Préréglages
+  const preset = $('preset');
+  preset.add(new Option('Custom', ''));
+  Object.keys(PRESETS).forEach(n => preset.add(new Option(n, n)));
+  preset.value = '';
+  preset.addEventListener('change', () => {
+    const p = PRESETS[preset.value]; if (!p) return;
+    apply({ colors: p.colors.slice(), paper: p.paper }); syncPalette();
+  });
+
+  // Couleurs
+  const sw = $('swatches'), swInputs = [];
+  for (let i = 0; i < 6; i++) {
+    const inp = Object.assign(document.createElement('input'), { type: 'color', ariaLabel: 'Color ' + (i + 1) });
+    inp.addEventListener('input', () => { const c = state.colors.slice(); c[i] = inp.value; apply({ colors: c }); preset.value = ''; });
+    sw.append(inp); swInputs.push(inp);
+  }
+  const paper = $('paper');
+  paper.addEventListener('input', () => { apply({ paper: paper.value }); preset.value = ''; });
+  const syncPalette = () => { swInputs.forEach((inp, i) => { inp.value = state.colors[i]; }); paper.value = state.paper; };
+
+  // Curseurs
+  const sliderUpdaters = [];
+  for (const [box, key, label, min, max, stepv] of SLIDERS) {
+    const row = document.createElement('div'); row.className = 'row';
+    const lab = Object.assign(document.createElement('label'), { htmlFor: 'r-' + key, textContent: label });
+    const out = document.createElement('output'); out.htmlFor = 'r-' + key;
+    const inp = Object.assign(document.createElement('input'), { type: 'range', id: 'r-' + key, min, max, step: stepv });
+    const show = () => { inp.value = state[key]; out.textContent = Number(state[key]).toFixed(stepv >= 1 ? 0 : 2); };
+    inp.addEventListener('input', () => { apply({ [key]: parseFloat(inp.value) }); show(); });
+    row.append(lab, out, inp); $(box).append(row); sliderUpdaters.push(show); show();
+  }
+
+  // Texte
+  const syncText = () => {
+    $('tHead').textContent = state.headline; $('tSub').textContent = state.subline;
+    $('heroText').hidden = !state.showText;
+  };
+  $('head').value = state.headline; $('sub').value = state.subline;
+  $('showText').checked = state.showText; $('clicks').checked = state.clicks;
+  $('head').addEventListener('input', e => { state.headline = e.target.value; syncText(); persist(); });
+  $('sub').addEventListener('input', e => { state.subline = e.target.value; syncText(); persist(); });
+  $('showText').addEventListener('change', e => { state.showText = e.target.checked; syncText(); persist(); });
+  $('clicks').addEventListener('change', e => apply({ clicks: e.target.checked }));
+
+  // Actions
+  let paused = false;
+  $('pause').addEventListener('click', e => { paused = !paused; wc.setPaused(paused); e.target.textContent = paused ? 'Play' : 'Pause'; });
+  $('restart').addEventListener('click', () => wc.restart());
+  const hsl = (h, s, l) => {
+    s /= 100; l /= 100;
+    const k = n => (n + h / 30) % 12, a = s * Math.min(l, 1 - l);
+    const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    return '#' + [f(0), f(8), f(4)].map(x => Math.round(x * 255).toString(16).padStart(2, '0')).join('');
+  };
+  $('rand').addEventListener('click', () => {
+    const h = Math.random() * 360, r = (a, b) => a + Math.random() * (b - a);
+    const colors = [h, h + 28, h + 55, h - 30, h + 180, h + 120].map((x, i) => hsl((x + 360) % 360, r(60, 88), i < 4 ? r(32, 56) : r(30, 50)));
+    apply({ colors, paper: hsl(h, r(8, 18), r(93, 96)) }); preset.value = ''; syncPalette(); wc.restart();
+  });
+
+  // Export
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  // Sur CodePen, la protection contre les boucles infinies injecte des appels window.CP dans les boucles :
+  // on les retire pour que la page exportée tourne partout
+  const engineSource = () => createWatercolor.toString()
+    .replace(/if\s*\(\s*window\.CP\.shouldStopExecution\(\d+\)\s*\)\s*(\{\s*break;?\s*\}|break;?)/g, '')
+    .replace(/window\.CP\.exitedLoop\(\d+\);?/g, '');
+  const buildHtml = () => {
+    const cfg = pick(ENGINE_KEYS);
+    const text = state.showText
+      ? `\n  <div class="hero-content">\n    <h1>${esc(state.headline)}</h1>\n    <p>${esc(state.subline)}</p>\n  </div>` : '';
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(state.headline)}</title>
+<!-- Watercolor Drops. MIT License - Copyright (c) 2026 Fabrice David (Brisco Webdesign) -->
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  html, body { min-height: 100%; background: ${cfg.paper}; color: #1d1a17; }
+  .hero { position: relative; min-height: 100svh; overflow: hidden; display: grid; place-items: center; isolation: isolate; }
+  .hero canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; z-index: -1; touch-action: manipulation; mix-blend-mode: multiply; }
+  .hero-content { position: relative; text-align: center; padding: 0 16px; max-width: 900px; pointer-events: none; }
+  .hero h1 { font: 600 clamp(2.4rem, 7vw, 5.5rem)/1.02 Georgia, "Times New Roman", serif; letter-spacing: -.02em; text-shadow: 0 0 8px rgba(255,255,255,.6), 0 0 28px rgba(255,255,255,.5); }
+  .hero p { margin-top: 1.2rem; font: 400 clamp(1rem, 2vw, 1.25rem)/1.5 system-ui, sans-serif; opacity: .85; text-shadow: 0 0 8px rgba(255,255,255,.6), 0 0 28px rgba(255,255,255,.5); }
+</style>
+</head>
+<body>
+<section class="hero" id="hero">
+  <canvas id="c" aria-hidden="true"></canvas>${text}
+</section>
+<script>
+${engineSource()}
+
+createWatercolor(document.getElementById('c'), document.getElementById('hero'), ${JSON.stringify(cfg)});
+<\/script>
+</body>
+</html>
+`;
+  };
+  const copy = async (text, ok) => {
+    try { await navigator.clipboard.writeText(text); toast(ok); }
+    catch (e) {
+      const ta = Object.assign(document.createElement('textarea'), { value: text }); document.body.append(ta); ta.select();
+      try { document.execCommand('copy'); toast(ok); } catch (err) { toast('Copy failed'); } ta.remove();
+    }
+  };
+  const download = (blob, name) => {
+    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name });
+    document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+  $('copyHtml').addEventListener('click', () => copy(buildHtml(), 'HTML copied'));
+  $('dlHtml').addEventListener('click', () => { download(new Blob([buildHtml()], { type: 'text/html' }), 'watercolor-hero.html'); toast('Downloaded'); });
+  $('copyJson').addEventListener('click', () => copy(JSON.stringify(state, null, 2), 'Settings copied'));
+  $('share').addEventListener('click', () => { persist(); setTimeout(() => copy(location.href, 'Link copied'), 300); });
+  $('dlPng').addEventListener('click', () => {
+    wc.draw();   // the WebGL buffer is only readable right after a draw
+    const c = document.createElement('canvas'); c.width = canvas.width; c.height = canvas.height;
+    const x = c.getContext('2d');
+    x.fillStyle = state.paper; x.fillRect(0, 0, c.width, c.height);
+    x.globalCompositeOperation = 'multiply'; x.drawImage(canvas, 0, 0);
+    c.toBlob(b => { download(b, 'watercolor.png'); toast('PNG saved'); });
+  });
+
+  // Panneau masquable
+  const setPanel = open => { $('panel').hidden = !open; $('reopen').hidden = open; };
+  $('hide').addEventListener('click', () => setPanel(false));
+  $('reopen').addEventListener('click', () => setPanel(true));
+  addEventListener('keydown', e => { if (e.key === 'h' && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) setPanel($('panel').hidden); });
+
+  // Dans une iframe (aperçu CodePen), l'adresse est celle de l'iframe : « Copy link » n'aurait pas de sens
+  if (window.top !== window.self) $('share').hidden = true;
+
+  // Le sélecteur affiche le préréglage correspondant aux couleurs courantes (sinon « Custom »)
+  const matching = Object.keys(PRESETS).find(n => PRESETS[n].paper === state.paper && PRESETS[n].colors.join() === state.colors.join());
+  if (matching) preset.value = matching;
+
+  syncPalette(); syncText();
+})();
+</script>
+</body>
+</html>
