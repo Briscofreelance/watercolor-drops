@@ -13,6 +13,8 @@
   .hero { position: fixed; inset: 0; overflow: hidden; display: grid; place-items: center; isolation: isolate; }
   .hero canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; z-index: -1; touch-action: manipulation; mix-blend-mode: multiply; }
   .hero-content { position: relative; text-align: center; padding: 0 16px; max-width: 900px; pointer-events: none; }
+  @media (min-width: 761px) { .panel-open .hero-content { transform: translateX(-170px); } }
+  .hero-content { transition: transform .3s; }
   .hero-content::before { content: ""; position: absolute; inset: -12% -8%; z-index: -1; border-radius: 50%;
     background: radial-gradient(closest-side, rgba(255,255,255,.55), rgba(255,255,255,0)); }
   .hero h1 { font: 600 clamp(2.4rem, 7vw, 5.5rem)/1.02 Georgia, "Times New Roman", serif; letter-spacing: -.02em; text-shadow: 0 0 8px rgba(255,255,255,.6), 0 0 28px rgba(255,255,255,.5); }
@@ -50,7 +52,7 @@
   @media (max-width: 760px) {
     .panel { top: auto; left: 8px; right: 8px; bottom: 8px; width: auto; max-height: 52vh; }
   }
-  @media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+  @media (prefers-reduced-motion: reduce) { .toast, .hero-content { transition: none; } }
 </style>
 </head>
 <body>
@@ -484,7 +486,7 @@ void main(){
   $('rand').addEventListener('click', () => {
     const h = Math.random() * 360, r = (a, b) => a + Math.random() * (b - a);
     const colors = [h, h + 28, h + 55, h - 30, h + 180, h + 120].map((x, i) => hsl((x + 360) % 360, r(60, 88), i < 4 ? r(32, 56) : r(30, 50)));
-    apply({ colors, paper: hsl(h, r(8, 18), r(93, 96)) }); preset.value = ''; syncPalette(); wc.restart();
+    apply({ colors, paper: hsl(h, r(8, 18), r(93, 96)) }); preset.value = ''; syncPalette();
   });
 
   // Export
@@ -553,7 +555,7 @@ createWatercolor(document.getElementById('c'), document.getElementById('hero'), 
   });
 
   // Panneau masquable
-  const setPanel = open => { $('panel').hidden = !open; $('reopen').hidden = open; };
+  const setPanel = open => { $('panel').hidden = !open; $('reopen').hidden = open; hero.classList.toggle('panel-open', open); };
   $('hide').addEventListener('click', () => setPanel(false));
   $('reopen').addEventListener('click', () => setPanel(true));
   addEventListener('keydown', e => { if (e.key === 'h' && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) setPanel($('panel').hidden); });
@@ -565,7 +567,7 @@ createWatercolor(document.getElementById('c'), document.getElementById('hero'), 
   const matching = Object.keys(PRESETS).find(n => PRESETS[n].paper === state.paper && PRESETS[n].colors.join() === state.colors.join());
   if (matching) preset.value = matching;
 
-  syncPalette(); syncText();
+  syncPalette(); syncText(); setPanel(true);
 })();
 </script>
 </body>
